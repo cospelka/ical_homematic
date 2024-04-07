@@ -1,0 +1,14 @@
+[Unit]
+Description=ical homematic Heizungssteuerung
+Requires=network.target
+After=network.target
+
+[Service]
+PIDFile=/run/ical_homematic.pid
+Type=simple
+User=ical_homematic
+Group=ical_homematic
+ExecStart=/usr/local/bin/ical_homematic.py
+
+[Install]
+WantedBy=multi-user.target
