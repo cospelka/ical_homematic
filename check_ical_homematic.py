@@ -15,6 +15,9 @@
 # You should have received a copy of the GNU General Public License
 # along with ical_homematic.  If not, see <http://www.gnu.org/licenses/>.
 
+# nagios/icinga plugin to check that ical_homematic is running and does 
+# not produce any errors.
+
 import os
 import time
 import sys
