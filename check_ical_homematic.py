@@ -29,7 +29,7 @@ def bye(status,statusstr):
 
 status=3
 
-statfilename=/usr/local/var/ical_homematic/ical_homematic.msg
+statfilename="/usr/local/var/ical_homematic/ical_homematic.msg"
 statusstr=f' Unable to read status file {statfilename}.'
 
 try:
