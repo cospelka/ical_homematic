@@ -60,8 +60,8 @@ def stop_error_log():
     os.rename(error_msg_filename_tmp,error_msg_filename)
 
 def error_msg(msg):
-    global err_msg_filename
-    with open(err_msg_filename,"a") as f:
+    global error_msg_filename
+    with open(error_msg_filename,"a") as f:
         f.write(f'{msg}\n')
 
 def logtime():
