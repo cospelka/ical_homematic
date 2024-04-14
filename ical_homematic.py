@@ -101,9 +101,7 @@ def get_room_data(room):
                     error_msg(f'{logtime()} Device {label} in room {room} is not reachable.')
                 if isinstance(d,homematicip.device.PlugableSwitchMeasuring):
                     retval["switches"][label]={"state": d.on, "energy": d.energyCounter}
-                if isinstance(d,homematicip.device.WallMountedThermostatPro):
-                    retval["setPointTemperature"]=d.setPointTemperature
-                    retval["actualTemperature"]=d.actualTemperature
+                if isinstance(d,homematicip.device.WallMountedThermostatPro) or isinstance(d,homematicip.device.TemperatureHumiditySensorWithoutDisplay):
                     retval["humidity"]=d.humidity
                     retval["vaporAmount"]=d.vaporAmount
                 elif isinstance(d,homematicip.device.HeatingThermostat) or isinstance(d,homematicip.device.HeatingThermostatCompact):
@@ -116,12 +114,10 @@ def get_room_data(room):
                     if vs != "ADAPTION_DONE":
                         error_msg(f'{logtime()} HeatingThermostat {label} in room {room} has valveState {vs}')
                     retval["thermostats"][label]=vp
-                elif isinstance(d,homematicip.device.TemperatureHumiditySensorDisplay) or isinstance(d,homematicip.device.TemperatureHumiditySensorWithoutDisplay):
-                    retval["actualTemperature"]=d.actualTemperature
-                    retval["humidity"]=d.humidity
-                    retval["vaporAmount"]=d.vaporAmount
         if g.groupType=="HEATING" and g.label==room:
             retval["boostDuration"]=g.boostDuration
+            retval["setPointTemperature"]=g.setPointTemperature
+            retval["actualTemperature"]=g.actualTemperature
     return retval
 
 def set_room_temperature(room,temperature):
@@ -172,6 +168,15 @@ def refresh_calendar(room):
 iniparser = configparser.RawConfigParser()
 iniparser.optionxform=str
 rooms = dict()
+rooms["global"]=dict()
+rooms["global"]["high"]=21.0
+rooms["global"]["low"]=18.0
+rooms["global"]["lown"]=16.0
+rooms["global"]["ramp"]=1.0
+rooms["global"]["influxdb"]="ical_homematic"
+rooms["global"]["influxhost"]="localhost"
+rooms["global"]["influxport"]=8086
+
 for config_file in config_files:
     try:
         iniparser.read(config_file)
@@ -188,11 +193,18 @@ for config_file in config_files:
                 log(f'JSON parse error in section {section}, key {key}. Bye.')
                 sys.exit(1)
 
-# Initialize some status variables
+# Initialize some status variables and pick up globals
+if "global" in rooms:
+    global_config=rooms.pop("global")
+else:
+    global_config=dict()
 for room in rooms:
     rooms[room]["in_event"] =  False
     rooms[room]["boostLastSet"] = datetime.datetime(1970,1,1,tzinfo=datetime.timezone.utc)
     rooms[room]["night_mode"] = False
+    for key in [ "high", "low", "lown", "ramp" ]:
+        if not key in rooms[room] and key in global_config:
+            rooms[room][key]=global_config[key]
 
 # Read Homematic IP config
 config = homematicip.find_and_load_config_file()
@@ -210,7 +222,7 @@ home.enable_events()
 
 # influxdb for logging
 try:
-    influx=InfluxDBClient("localhost",8086,database="kirche_heizung")
+    influx=InfluxDBClient(global_config["influxhost"],global_config["influxport"],database=global_config["influxdb"])
 except:
     log(f'Could not setup InfluxDB client. Bye.')
     sys.exit(1)
@@ -295,55 +307,54 @@ while True:
         if should_be_in_event and not rooms[room]["in_event"]:
             rooms[room]["in_event"] = True
             log(f'BEGIN {room}: {rooms[room]["event_title"]}')
-            if "high" in rooms[room]:
-                if state["setPointTemperature"] + 0.1 < rooms[room]["high"]:
-                    log(f'ACTION {room}: Setting temperature to {rooms[room]["high"]}°C (Reason: {rooms[room]["event_title"]}).')
-                    set_room_temperature(room,rooms[room]["high"])
-                else:
-                    log(f'ACTION {room}: No need to set temperature to {rooms[room]["high"]}°C; it is already at {state["setPointTemperature"]}°C (Reason: {rooms[room]["event_title"]}).')
-            elif "switches" in rooms[room]:
-                for switch in rooms[room]["switches"]:
+            if state["setPointTemperature"] + 0.1 < rooms[room]["high"]:
+                log(f'ACTION {room}: Setting temperature to {rooms[room]["high"]}°C (Reason: {rooms[room]["event_title"]}).')
+                set_room_temperature(room,rooms[room]["high"])
+            else:
+                log(f'ACTION {room}: No need to set temperature to {rooms[room]["high"]}°C; it is already at {state["setPointTemperature"]}°C (Reason: {rooms[room]["event_title"]}).')
+            if "heating_switches" in rooms[room]:
+                for switch in rooms[room]["heating_switches"]:
                     log(f'ACTION {room}: Setting switch {switch} to on. (Reason: {rooms[room]["event_title"]})')
                     set_room_switch(room,switch,True)
         if not should_be_in_event and rooms[room]["in_event"]:
             rooms[room]["in_event"] = False
             log(f'END {room}: {rooms[room]["event_title"]}')
-            if "high" in rooms[room]:
-                log(f'ACTION {room}: Setting temperature to {rooms[room]["low"]}°C. (Reason: {rooms[room]["event_title"]})')
-                set_room_temperature(room,rooms[room]["low"])
-            elif "switches" in rooms[room]:
-                for switch in rooms[room]["switches"]:
+            log(f'ACTION {room}: Setting temperature to {rooms[room]["low"]}°C. (Reason: {rooms[room]["event_title"]})')
+            set_room_temperature(room,rooms[room]["low"])
+            if "heating_switches" in rooms[room]:
+                for switch in rooms[room]["heating_switches"]:
                     log(f'ACTION {room}: Setting switch {switch} to off. (Reason: {rooms[room]["event_title"]})')
                     set_room_switch(room,switch,False)
 
-        # In case we are in the ramp-up for the next event, set the set value to max(current value, ramp value)
-        if "high" in rooms[room]:
-            if should_be_ramping:
-                if state["actualTemperature"] < rooms[room]["high"] - timetohot * rooms[room]["ramp"]/3600. and state["setPointTemperature"] < rooms[room]["high"]: 
-                    log(f'ACTION {room}: Setting temperature to {rooms[room]["high"]}°C at {timetohot} seconds from next event (Reason: {rooms[room]["event_title"]}).')
-                    set_room_temperature(room,rooms[room]["high"])
+        # We assume that if heating_switches are not set for this room, boost mode does not make any sense, and neither the pre-heating mode or the overnight reduction
+        if "heating_switches" in rooms[room]:
+            continue
+
+        # In case we are in the ramp-up for the next event, set the set value to "high" when the ramp goes through the current temperature
+        if should_be_ramping:
+            if state["actualTemperature"] < rooms[room]["high"] - timetohot * rooms[room]["ramp"]/3600. and state["setPointTemperature"] < rooms[room]["high"]: 
+                log(f'ACTION {room}: Setting temperature to {rooms[room]["high"]}°C at {timetohot} seconds from next event (Reason: {rooms[room]["event_title"]}).')
+                set_room_temperature(room,rooms[room]["high"])
 
         # Do we need to boost?
         threshold=0.25
-        if "high" in rooms[room]:
-            if state["setPointTemperature"] - state["actualTemperature"] > threshold:
-                if (start_date - rooms[room]["boostLastSet"]).total_seconds() > state["boostDuration"]:
-                    log(f'ACTION {room}: Setting {state["boostDuration"]} minutes boost mode because set point {state["setPointTemperature"]}°C is more than {threshold}K above the room temperature {state["actualTemperature"]}°C.')
-                    set_room_boost(room, True)
-                    rooms[room]["boostLastSet"]=start_date
+        if state["setPointTemperature"] - state["actualTemperature"] > threshold:
+            if (start_date - rooms[room]["boostLastSet"]).total_seconds() > state["boostDuration"]*60.0:
+                log(f'ACTION {room}: Setting {state["boostDuration"]} minutes boost mode because set point {state["setPointTemperature"]}°C is more than {threshold}K above the room temperature {state["actualTemperature"]}°C.')
+                set_room_boost(room, True)
+                rooms[room]["boostLastSet"]=start_date
 
         # Reduction of base temperature over night
-        if "high" in rooms[room]:
-            if start_date_local.hour >= 23 or start_date_local.hour < 7:
-                if not rooms[room]["night_mode"]:
-                    log(f'ACTION {room}: Setting to reduced base temperature of {rooms[room]["lown"]}°C over night.')
-                    set_room_temperature(room,rooms[room]["lown"])
-                    rooms[room]["night_mode"] = True
-            else:
-                if rooms[room]["night_mode"]:
-                    log(f'ACTION {room}: Setting to base temperature of {rooms[room]["low"]}°C.')
-                    set_room_temperature(room,rooms[room]["low"])
-                    rooms[room]["night_mode"] = False
+        if start_date_local.hour >= 23 or start_date_local.hour < 7:
+            if not rooms[room]["night_mode"]:
+                log(f'ACTION {room}: Setting to reduced base temperature of {rooms[room]["lown"]}°C over night.')
+                set_room_temperature(room,rooms[room]["lown"])
+                rooms[room]["night_mode"] = True
+        else:
+            if rooms[room]["night_mode"]:
+                log(f'ACTION {room}: Setting to base temperature of {rooms[room]["low"]}°C.')
+                set_room_temperature(room,rooms[room]["low"])
+                rooms[room]["night_mode"] = False
 
     stop_error_log()
 
