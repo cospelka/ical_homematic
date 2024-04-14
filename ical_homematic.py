@@ -202,7 +202,7 @@ for room in rooms:
     rooms[room]["in_event"] =  False
     rooms[room]["boostLastSet"] = datetime.datetime(1970,1,1,tzinfo=datetime.timezone.utc)
     rooms[room]["night_mode"] = False
-    for key in [ "high", "low", "lown", "ramp" ]:
+    for key in [ "high", "low", "lown", "ramp", "night_start", "night_end" ]:
         if not key in rooms[room] and key in global_config:
             rooms[room][key]=global_config[key]
 
@@ -345,13 +345,26 @@ while True:
                 rooms[room]["boostLastSet"]=start_date
 
         # Reduction of base temperature over night
-        if start_date_local.hour >= 23 or start_date_local.hour < 7:
-            if not rooms[room]["night_mode"]:
+        if "night_start" in rooms[room] and "night_end" in rooms[room]:
+            # Are we in the configured night time period?
+            if rooms[room]["night_start"] > rooms[room]["night_end"]:
+                # The period with reduced temperature includes midnight. This will be the more common case.
+                if start_date_local.hour >= rooms[room]["night_start"] or start_date_local.hour < rooms[room]["night_end"]:
+                    should_be_in_night_mode = True
+                else:
+                    should_be_in_night_mode = False
+            else:
+                # This is the other case...
+                if start_date_local.hour >= rooms[room]["night_start"] and start_date_local.hour < rooms[room]["night_end"]:
+                    should_be_in_night_mode = True
+                else:
+                    should_be_in_night_mode = False
+            # Flank detection for night mode
+            if should_be_in_night_mode and not rooms[room]["night_mode"]:
                 log(f'ACTION {room}: Setting to reduced base temperature of {rooms[room]["lown"]}°C over night.')
                 set_room_temperature(room,rooms[room]["lown"])
                 rooms[room]["night_mode"] = True
-        else:
-            if rooms[room]["night_mode"]:
+            elif rooms[room]["night_mode"] and not should_be_in_night_mode:
                 log(f'ACTION {room}: Setting to base temperature of {rooms[room]["low"]}°C.')
                 set_room_temperature(room,rooms[room]["low"])
                 rooms[room]["night_mode"] = False
