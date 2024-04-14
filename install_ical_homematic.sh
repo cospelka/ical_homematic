@@ -82,20 +82,20 @@ chown -R root "${hmip_rest_api_confdir}"
 
 echo "Installiere ical_homematic.py in /usr/local/bin"
 cp "${srcdir}/ical_homematic.py" "${bindir}"
+chmod 755 "${bindir}/ical_homematic.py"
 
 echo "Installiere nagios/icinga plugin in ${nagios_plugin_dir}."
-if ! [ -d "${nagios_plugin_dir}" ] ; then
-  mkdir -p "${nagios_plugin_dir}"
-fi
+mkdir -p "${nagios_plugin_dir}"
 cp "${srcdir}/check_ical_homematic.py" "${nagios_plugin_dir}/"
 
 if [ -f "$ical_homematic_conffile" ] ; then
   echo "Konfigurationsdatei ${ical_homematic_conffile} existiert bereits und wird nicht überschrieben."
 else
   echo "Erstelle Konfigurationsdatei ${ical_homematic_conffile}."
-  cp "${srcdir}/ical_homematic.ini" "$ical_homematic_conffile"
-  if [ -f "/root/ical_homematic.local.ini" ] ; then
-    cat "/root/ical_homematic.local.ini" >>"$ical_homematic_conffile" 
+  if [ -f "/root/ical_homematic_local/ical_homematic.ini" ] ; then
+    cp "/root/ical_homematic_local/ical_homematic.ini" "$ical_homematic_conffile" 
+  else
+    cp "${srcdir}/ical_homematic.ini" "$ical_homematic_conffile"
   fi
 fi
 
