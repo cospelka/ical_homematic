@@ -16,4 +16,4 @@ python -m venv /usr/local/share/mypy
 
 The main python file assumes the python interpreter from the above virtual environment.
 
-A full installation script (read for background information) that works on debian linux can be found in install_ical_homematic.sh
+A full installation script (read for background information) that works on debian linux can be found in `install_ical_homematic.sh`
