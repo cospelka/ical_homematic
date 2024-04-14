@@ -267,23 +267,22 @@ while True:
         should_be_ramping=False
 
         # Are there any events within the next 'lookahead' hours that contain heating_keyword?
-        myevent=False
-        if events:
-            for event in events:
-                event_title=str(events[0]["SUMMARY"])
-                if heating_keyword in event_title:
-                    myevent=event
-                    break
-        if myevent:
+        heatevents=list()
+        for event in events:
+            if heating_keyword in str(events[0]["SUMMARY"]):
+                heatevents.append(event)
+
+        if heatevents:
             # Time to event
-            timetohot=(events[0]["DTSTART"].dt - start_date).total_seconds()
+            timetohot=(heatevents[0]["DTSTART"].dt - start_date).total_seconds()
+            rooms[room]["event_title"] = str(heatevents[0]["SUMMARY"])
             if timetohot < 0: 
                 # We are already in the event
                 should_be_in_event = True
-                if len(events) >= 2:
+                if len(heatevents) >= 2:
                     # We are in the event and the next event is already in sight
                     should_be_ramping = True
-                    timetohot=(events[1]["DTSTART"].dt - start_date).total_seconds()
+                    timetohot=(heatevents[1]["DTSTART"].dt - start_date).total_seconds()
                 else:
                     # We are in the event and no other event is in sight within the next 'lookahead' hours
                     should_be_ramping = False
@@ -294,32 +293,34 @@ while True:
 
         # Flank detection for should_be_in_event
         if should_be_in_event and not rooms[room]["in_event"]:
+            rooms[room]["in_event"] = True
+            log(f'BEGIN {room}: {rooms[room]["event_title"]}')
             if "high" in rooms[room]:
                 if state["setPointTemperature"] + 0.1 < rooms[room]["high"]:
-                    log(f'ACTION {room}: Setting temperature to {rooms[room]["high"]}°C (Reason: {event_title}).')
+                    log(f'ACTION {room}: Setting temperature to {rooms[room]["high"]}°C (Reason: {rooms[room]["event_title"]}).')
                     set_room_temperature(room,rooms[room]["high"])
                 else:
-                    log(f'ACTION {room}: No need to set temperature to {rooms[room]["high"]}°C; it is already at {state["setPointTemperature"]}°C (Reason: {event_title}).')
+                    log(f'ACTION {room}: No need to set temperature to {rooms[room]["high"]}°C; it is already at {state["setPointTemperature"]}°C (Reason: {rooms[room]["event_title"]}).')
             elif "switches" in rooms[room]:
                 for switch in rooms[room]["switches"]:
-                    log(f'ACTION {room}: Setting switch {switch} to on. (Reason: {event_title})')
+                    log(f'ACTION {room}: Setting switch {switch} to on. (Reason: {rooms[room]["event_title"]})')
                     set_room_switch(room,switch,True)
-            rooms[room]["in_event"] = True
         if not should_be_in_event and rooms[room]["in_event"]:
+            rooms[room]["in_event"] = False
+            log(f'END {room}: {rooms[room]["event_title"]}')
             if "high" in rooms[room]:
-                log(f'ACTION {room}: Setting temperature to {rooms[room]["low"]}°C. (Reason: {event_title})')
+                log(f'ACTION {room}: Setting temperature to {rooms[room]["low"]}°C. (Reason: {rooms[room]["event_title"]})')
                 set_room_temperature(room,rooms[room]["low"])
             elif "switches" in rooms[room]:
                 for switch in rooms[room]["switches"]:
-                    log(f'ACTION {room}: Setting switch {switch} to off. (Reason: {event_title})')
+                    log(f'ACTION {room}: Setting switch {switch} to off. (Reason: {rooms[room]["event_title"]})')
                     set_room_switch(room,switch,False)
-            rooms[room]["in_event"] = False
 
         # In case we are in the ramp-up for the next event, set the set value to max(current value, ramp value)
         if "high" in rooms[room]:
             if should_be_ramping:
                 if state["actualTemperature"] < rooms[room]["high"] - timetohot * rooms[room]["ramp"]/3600. and state["setPointTemperature"] < rooms[room]["high"]: 
-                    log(f'ACTION {room}: Setting temperature to {rooms[room]["high"]}°C at {timetohot} seconds from next event (Reason: {event_title}).')
+                    log(f'ACTION {room}: Setting temperature to {rooms[room]["high"]}°C at {timetohot} seconds from next event (Reason: {rooms[room]["event_title"]}).')
                     set_room_temperature(room,rooms[room]["high"])
 
         # Do we need to boost?
