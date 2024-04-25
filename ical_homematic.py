@@ -337,12 +337,12 @@ while True:
                 set_room_temperature(room,rooms[room]["high"])
 
         # Do we need to boost?
-        threshold=0.25
-        if state["setPointTemperature"] - state["actualTemperature"] > threshold:
-            if (start_date - rooms[room]["boostLastSet"]).total_seconds() > state["boostDuration"]*60.0:
-                log(f'ACTION {room}: Setting {state["boostDuration"]} minutes boost mode because set point {state["setPointTemperature"]}°C is more than {threshold}K above the room temperature {state["actualTemperature"]}°C.')
-                set_room_boost(room, True)
-                rooms[room]["boostLastSet"]=start_date
+        if "boost_threshold" in rooms[room]:
+            if state["setPointTemperature"] - state["actualTemperature"] > rooms[room]["boost_threshold"]:
+                if (start_date - rooms[room]["boostLastSet"]).total_seconds() > state["boostDuration"]*60.0:
+                    log(f'ACTION {room}: Setting {state["boostDuration"]} minutes boost mode because set point {state["setPointTemperature"]}°C is more than {threshold}K above the room temperature {state["actualTemperature"]}°C.')
+                    set_room_boost(room, True)
+                    rooms[room]["boostLastSet"]=start_date
 
         # Reduction of base temperature over night
         if "night_start" in rooms[room] and "night_end" in rooms[room]:
@@ -361,12 +361,15 @@ while True:
                     should_be_in_night_mode = False
             # Flank detection for night mode
             if should_be_in_night_mode and not rooms[room]["night_mode"]:
-                log(f'ACTION {room}: Setting to reduced base temperature of {rooms[room]["lown"]}°C over night.')
-                set_room_temperature(room,rooms[room]["lown"])
-                rooms[room]["night_mode"] = True
+                if not (rooms[room]["in_event"] or should_be_ramping):
+                    log(f'ACTION {room}: Setting to reduced base temperature of {rooms[room]["lown"]}°C over night.')
+                    set_room_temperature(room,rooms[room]["lown"])
+                    rooms[room]["night_mode"] = True
             elif rooms[room]["night_mode"] and not should_be_in_night_mode:
-                log(f'ACTION {room}: Setting to base temperature of {rooms[room]["low"]}°C.')
-                set_room_temperature(room,rooms[room]["low"])
+                if state["setPointTemperature"] < rooms[room]["low"]:
+                    log(f'ACTION {room}: Setting to base temperature of {rooms[room]["low"]}°C.')
+                    set_room_temperature(room,rooms[room]["low"])
+                log(f'ACTION {room}: Leaving night mode.')
                 rooms[room]["night_mode"] = False
 
     stop_error_log()
