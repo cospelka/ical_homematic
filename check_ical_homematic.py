@@ -24,31 +24,30 @@ import sys
 
 def bye(status,statusstr):
   exstring = [ "OK", "WARNING", "CRITICAL", "UNKNOWN" ]
-  print(f'{exstring[status]}{statusstr}')
+  print(f'{exstring[status]} {statusstr}')
   sys.exit(status)
 
-status=3
-
 statfilename="/usr/local/var/ical_homematic/ical_homematic.msg"
-statusstr=f' Unable to read status file {statfilename}.'
 
 try:
   statfiletime=os.path.getmtime(statfilename)
 except:
-  statusstr=f' Unable to determine modification time of status file {statfilename}.'
-  bye(status,statusstr)
+  bye(3,f' Unable to determine modification time of status file {statfilename}.')
 
 if time.time()-statfiletime > 120:
-  statusstr=f' Last modification time of status file {statfilename} is more than 120 seconds ago.'
-  bye(status,statusstr)
+  bye(3,f' Last modification time of status file {statfilename} is more than 120 seconds ago.')
 
+status=3
+statusstr=f'Could not read from {statfilename}'
 with open(statfilename) as f:
   try:
-    statusstr=f.readline()
-    if statusstr:
-        status=2
+    statusarr=f.readlines()
+    if statusarr:
+        status=int(statusarr[0])
+        statusarr.pop(0)
+        statusstr=' '.join(statusarr)
     else:
-        status=0
+        statusstr=f'Status file {statfilename} is empty.'
   except:
     pass
 

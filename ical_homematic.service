@@ -1,7 +1,7 @@
 [Unit]
 Description=ical homematic Heizungssteuerung
-Requires=network.target
-After=network.target
+Requires=network.target influxd.service
+After=network.target influxd.service
 
 [Service]
 PIDFile=/run/ical_homematic.pid

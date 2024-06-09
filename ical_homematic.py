@@ -34,7 +34,6 @@ from influxdb import InfluxDBClient
 
 # This is where we put the error messages for icinga
 error_msg_filename="/usr/local/var/ical_homematic/ical_homematic.msg"
-error_msg_filename_tmp=error_msg_filename + ".tmp"
 
 # Our config file
 config_files= [ "/usr/local/etc/ical_homematic.ini", "/etc/ical_homematic.ini" ]
@@ -50,19 +49,25 @@ lookahead=4
 heating_keyword="(HEIZ)"
 
 def start_error_log():
-    global error_msg_filename_tmp
-    with open(error_msg_filename_tmp,"w") as f:
-        f.write('')
+    global error_log
+    global icinga_status
+    error_log=[]
+    icinga_status=0
 
 def stop_error_log():
     global error_msg_filename
-    global error_msg_filename_tmp
-    os.rename(error_msg_filename_tmp,error_msg_filename)
+    global error_log
+    global icinga_status
+    with open(error_msg_filename,"w") as f:
+        f.write(str(icinga_status))
+        f.write('\n')
+        f.write('\n'.join(error_log))
 
-def error_msg(msg):
-    global error_msg_filename
-    with open(error_msg_filename,"a") as f:
-        f.write(f'{msg}\n')
+def error_msg(msg,status=0):
+    global error_log
+    global icinga_status
+    icinga_status=max(icinga_status,status)
+    error_log.append(msg)
 
 def logtime():
     return datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
@@ -96,9 +101,9 @@ def get_room_data(room):
             for d in g.devices:
                 label=d.label
                 if d.lowBat:
-                    error_msg(f'{logtime()} Device {label} in room {room} has low battery.')
+                    error_msg(f'Device {label} in room {room} has low battery.',1)
                 if d.unreach:
-                    error_msg(f'{logtime()} Device {label} in room {room} is not reachable.')
+                    error_msg(f'Device {label} in room {room} is not reachable.',2)
                 if isinstance(d,homematicip.device.PlugableSwitchMeasuring):
                     retval["switches"][label]={"state": d.on, "energy": d.energyCounter}
                 if isinstance(d,homematicip.device.WallMountedThermostatPro) or isinstance(d,homematicip.device.TemperatureHumiditySensorWithoutDisplay):
@@ -108,11 +113,11 @@ def get_room_data(room):
                     vp=d.valvePosition
                     vs=d.valveState
                     if not isinstance (vp,float):
-                        error_msg(f'{logtime()} HeatingThermostat {label} in room {room} has valvePosition {vp}.')
+                        error_msg(f'HeatingThermostat {label} in room {room} has valvePosition {vp}.',2)
                     if d.automaticValveAdaptionNeeded:
-                        error_msg(f'{logtime()} HeatingThermostat {label} in room {room} requires automatic valve adaption.')
+                        error_msg(f'HeatingThermostat {label} in room {room} requires automatic valve adaption.',2)
                     if vs != "ADAPTION_DONE":
-                        error_msg(f'{logtime()} HeatingThermostat {label} in room {room} has valveState {vs}')
+                        error_msg(f'HeatingThermostat {label} in room {room} has valveState {vs}',2)
                     retval["thermostats"][label]=vp
         if g.groupType=="HEATING" and g.label==room:
             retval["boostDuration"]=g.boostDuration
@@ -126,7 +131,7 @@ def set_room_temperature(room,temperature):
         if g.groupType=="HEATING" and g.label==room:
             g.set_point_temperature(temperature)
             return True
-    error_msg(f'{logtime()} Set point temperature could not be set to {temperature} for room {room} because we did not find the proper heating group.')
+    error_msg(f'Set point temperature could not be set to {temperature} for room {room} because we did not find the proper heating group.',2)
     return False
 
 def set_room_boost(room,status):
@@ -135,7 +140,7 @@ def set_room_boost(room,status):
         if g.groupType=="HEATING" and g.label==room:
             g.set_boost(enable=status)
             return True
-    error_msg(f'{logtime()} Boost mode could not be set to {status} for room {room} because we did not find the proper heating group.')
+    error_msg(f'Boost mode could not be set to {status} for room {room} because we did not find the proper heating group.',2)
     return False
 
 def set_room_switch(room,switch,status):
@@ -147,19 +152,19 @@ def set_room_switch(room,switch,status):
                 if isinstance(d,homematicip.device.PlugableSwitchMeasuring) and label==switch:
                     d.set_switch_state(status)
                     return True
-    error_msg(f'{logtime()} Switch state for switch {switch} in room {room} could not be set to {status} bcuause we did not find the proper device.')
+    error_msg(f'Switch state for switch {switch} in room {room} could not be set to {status} bcuause we did not find the proper device.',2)
     return False
 
 def refresh_calendar(room):
     try:
         ical_string = urllib.request.urlopen(room["url"]).read()
     except:
-        error_msg(f'Could not download calendar file for {room}')
+        error_msg(f'Could not download calendar file for {room}',2)
     else:
         try:
             tmpcal = icalendar.Calendar.from_ical(ical_string)
         except:
-            error_msg(f'{logtime()} Could not convert calendar file to icalendar for {room}')
+            error_msg(f'Could not convert calendar file to icalendar for {room}',2)
         else:
             room["calendar"] = tmpcal
             room["cal_last_update"] = datetime.datetime.now()
@@ -228,6 +233,7 @@ except:
     sys.exit(1)
 
 # Main loop
+icinga_status=0
 while True:
 
     start_error_log()
@@ -266,7 +272,11 @@ while True:
                     "fields":      fields
                 }
                ]
-        influx.write_points(series)
+        try:
+            influx.write_points(series)
+        except:
+            log("Write to influxdb failed.")
+            error_msg("Write to influxdb failed.",1)
 
         # Stop processing this room in case we only follow it for logging purposes
         if not "url" in rooms[room]:
@@ -305,26 +315,28 @@ while True:
 
         # Flank detection for should_be_in_event
         if should_be_in_event and not rooms[room]["in_event"]:
-            rooms[room]["in_event"] = True
             log(f'BEGIN {room}: {rooms[room]["event_title"]}')
             if state["setPointTemperature"] + 0.1 < rooms[room]["high"]:
                 log(f'ACTION {room}: Setting temperature to {rooms[room]["high"]}°C (Reason: {rooms[room]["event_title"]}).')
-                set_room_temperature(room,rooms[room]["high"])
+                if set_room_temperature(room,rooms[room]["high"]):
+                    rooms[room]["in_event"] = True
             else:
                 log(f'ACTION {room}: No need to set temperature to {rooms[room]["high"]}°C; it is already at {state["setPointTemperature"]}°C (Reason: {rooms[room]["event_title"]}).')
             if "heating_switches" in rooms[room]:
                 for switch in rooms[room]["heating_switches"]:
                     log(f'ACTION {room}: Setting switch {switch} to on. (Reason: {rooms[room]["event_title"]})')
-                    set_room_switch(room,switch,True)
+                    if set_room_switch(room,switch,True):
+                        rooms[room]["in_event"] = True
         if not should_be_in_event and rooms[room]["in_event"]:
-            rooms[room]["in_event"] = False
             log(f'END {room}: {rooms[room]["event_title"]}')
             log(f'ACTION {room}: Setting temperature to {rooms[room]["low"]}°C. (Reason: {rooms[room]["event_title"]})')
-            set_room_temperature(room,rooms[room]["low"])
+            if set_room_temperature(room,rooms[room]["low"]):
+                rooms[room]["in_event"] = False
             if "heating_switches" in rooms[room]:
                 for switch in rooms[room]["heating_switches"]:
                     log(f'ACTION {room}: Setting switch {switch} to off. (Reason: {rooms[room]["event_title"]})')
-                    set_room_switch(room,switch,False)
+                    if set_room_switch(room,switch,False):
+                        rooms[room]["in_event"] = False
 
         # We assume that if heating_switches are not set for this room, boost mode does not make any sense, and neither the pre-heating mode or the overnight reduction
         if "heating_switches" in rooms[room]:
@@ -363,14 +375,15 @@ while True:
             if should_be_in_night_mode and not rooms[room]["night_mode"]:
                 if not (rooms[room]["in_event"] or should_be_ramping):
                     log(f'ACTION {room}: Setting to reduced base temperature of {rooms[room]["lown"]}°C over night.')
-                    set_room_temperature(room,rooms[room]["lown"])
-                    rooms[room]["night_mode"] = True
+                    if set_room_temperature(room,rooms[room]["lown"]):
+                        log(f'ACTION {room}: Entering night mode.')
+                        rooms[room]["night_mode"] = True
             elif rooms[room]["night_mode"] and not should_be_in_night_mode:
                 if state["setPointTemperature"] < rooms[room]["low"]:
                     log(f'ACTION {room}: Setting to base temperature of {rooms[room]["low"]}°C.')
-                    set_room_temperature(room,rooms[room]["low"])
-                log(f'ACTION {room}: Leaving night mode.')
-                rooms[room]["night_mode"] = False
+                    if set_room_temperature(room,rooms[room]["low"]):
+                        log(f'ACTION {room}: Leaving night mode.')
+                        rooms[room]["night_mode"] = False
 
     stop_error_log()
 
