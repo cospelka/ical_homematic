@@ -283,7 +283,11 @@ while True:
             continue
 
         # Get events within the next 'lookahead' hours 
-        events = sorted(recurring_ical_events.of(rooms[room]["calendar"]).between(start_date, end_date), key=lambda event: event["DTSTART"].dt)
+        try:
+            events = sorted(recurring_ical_events.of(rooms[room]["calendar"]).between(start_date, end_date), key=lambda event: event["DTSTART"].dt)
+        except:
+            log(f'Unable to get events within next {lookahead} hours for room {room}.')
+            error_msg(f'Unable to get events within next {lookahead} hours for room {room}.',1)
 
         should_be_in_event=False
         should_be_ramping=False
