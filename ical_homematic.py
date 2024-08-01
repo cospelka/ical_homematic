@@ -288,6 +288,7 @@ while True:
         except:
             log(f'Unable to get events within next {lookahead} hours for room {room}.')
             error_msg(f'Unable to get events within next {lookahead} hours for room {room}.',1)
+            events=list()
 
         should_be_in_event=False
         should_be_ramping=False
