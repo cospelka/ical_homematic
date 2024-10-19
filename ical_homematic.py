@@ -317,6 +317,9 @@ while True:
                 # We are not in the event yet
                 should_be_in_event = False
                 should_be_ramping = True
+        else:
+                should_be_in_event = False
+                should_be_ramping = False
 
         # Flank detection for should_be_in_event
         if should_be_in_event and not rooms[room]["in_event"]:
@@ -327,6 +330,7 @@ while True:
                     rooms[room]["in_event"] = True
             else:
                 log(f'ACTION {room}: No need to set temperature to {rooms[room]["high"]}°C; it is already at {state["setPointTemperature"]}°C (Reason: {rooms[room]["event_title"]}).')
+                rooms[room]["in_event"] = True
             if "heating_switches" in rooms[room]:
                 for switch in rooms[room]["heating_switches"]:
                     log(f'ACTION {room}: Setting switch {switch} to on. (Reason: {rooms[room]["event_title"]})')
