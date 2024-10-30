@@ -62,7 +62,7 @@ if [ -d "${hmip_rest_api_confdir}" ] ; then
   echo "Verzeichnis ${hmip_rest_api_confdir} existiert bereits."
 else
   echo "Erzeugen des Verzeichnisses ${hmip_rest_api_confdir}."
-  mkdir -p "${hmip_rest_api_confidr}"
+  mkdir -p "${hmip_rest_api_confdir}"
   chown "${localuser}:" "${hmip_rest_api_confdir}"
 fi
 
