@@ -33,10 +33,10 @@ import homematicip.base.enums
 from influxdb import InfluxDBClient
 
 # This is where we put the error messages for icinga
-error_msg_filename="/usr/local/var/ical_homematic/ical_homematic.msg"
+error_msg_filename="ical_homematic.msg"
 
 # Our config file
-config_files= [ "/usr/local/etc/ical_homematic.ini", "/etc/ical_homematic.ini" ]
+config_files= [ "ical_homematic.ini" ]
 
 # One cycle lasts 60 seconds
 cycle_time = 60.
@@ -73,7 +73,7 @@ def logtime():
     return datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
 def log(msg):
-    with open("/usr/local/var/ical_homematic/ical_homematic.log","a") as f:
+    with open("ical_homematic.log","a") as f:
         f.write(f'{logtime()} {msg}\n')
 
 def handle_events(event_list):
@@ -212,6 +212,7 @@ for room in rooms:
             rooms[room][key]=global_config[key]
 
 # Read Homematic IP config
+print(homematicip.get_config_file_locations())
 config = homematicip.find_and_load_config_file()
 if config == None:
     log("Cannot find config.ini!")
