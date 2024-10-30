@@ -8,7 +8,7 @@ PIDFile=/run/ical_homematic.pid
 Type=simple
 User=ical_homematic
 Group=ical_homematic
-ExecStart=/usr/local/bin/ical_homematic.py
+ExecStart=/var/local/ical_homematic/ical_homematic.py
 WorkingDirectory=/var/local/ical_homematic
 
 [Install]

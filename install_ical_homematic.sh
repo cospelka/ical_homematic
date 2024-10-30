@@ -107,7 +107,7 @@ cp "${srcdir}/ical_homematic.service" "$servicefile"
 sed -i -e "s/^User=ical_homematic/User=${localuser}/"  "$servicefile"
 sed -i -e "s/^Group=ical_homematic/Group=${localuser}/" "$servicefile"
 sed -i -e "s/^WorkingDirectory=\/var\/local\/ical_homematic/WorkingDirectory=\/var\/local\/ical_homematic${usuffix}/" "$servicefile"
-sed -i -e "s/^ExecStart=\/var\/local\/ical_homematic\/ical_homematic.py=\/var\/local\/ical_homematic${usuffix}\/ical_homematic.py/" "$servicefile"
+sed -i -e "s/^ExecStart=\/var\/local\/ical_homematic\/ical_homematic.py/ExecStart=\/var\/local\/ical_homematic${usuffix}\/ical_homematic.py/" "$servicefile"
 
 systemctl daemon-reload
 systemctl enable --now ical_homematic${usuffix}.service
