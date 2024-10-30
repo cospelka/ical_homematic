@@ -17,9 +17,6 @@ ical_homematic_conffile="${localdir}/ical_homematic.ini"
 # Customizing venv not supported, as the path is hardcoded in the first line of ical_homematic.py.
 venv="/usr/local/share/mypy"
 
-# Customization not supported, as the path is hardcoded in the systemd unit file ical_homematic.service.
-bindir="/usr/local/bin"
-
 # Do not change unless you know what you are doing.
 srcdir="/usr/local/src/ical_homematic"
 
@@ -83,8 +80,9 @@ if ! [ -f "${hmip_rest_api_confdir}/config.ini" ] ; then
 fi
 
 echo "Installiere ical_homematic.py in /usr/local/bin"
-cp "${srcdir}/ical_homematic.py" "${bindir}"
-chmod 755 "${bindir}/ical_homematic.py"
+cp "${srcdir}/ical_homematic.py" "${localdir}"
+chown "${localuser}:" "${localdir}/ical_homematic.py"
+chmod 755 "${localdir}/ical_homematic.py"
 
 echo "Installiere nagios/icinga plugin in ${nagios_plugin_dir}."
 mkdir -p "${nagios_plugin_dir}"
@@ -109,6 +107,7 @@ cp "${srcdir}/ical_homematic.service" "$servicefile"
 sed -i -e "s/^User=ical_homematic/User=${localuser}/"  "$servicefile"
 sed -i -e "s/^Group=ical_homematic/Group=${localuser}/" "$servicefile"
 sed -i -e "s/^WorkingDirectory=\/var\/local\/ical_homematic/WorkingDirectory=\/var\/local\/ical_homematic${usuffix}/" "$servicefile"
+sed -i -e "s/^ExecStart=\/var\/local\/ical_homematic\/ical_homematic.py=\/var\/local\/ical_homematic${usuffix}\/ical_homematic.py/" "$servicefile"
 
 systemctl daemon-reload
 systemctl enable --now ical_homematic${usuffix}.service
