@@ -104,10 +104,11 @@ else
 fi
 
 echo "Erstelle Systemdienst für ical_homematic."
-cp "${srcdir}/ical_homematic.service" "/etc/systemd/system/ical_homeatic${usuffix}.service"
-sed -i -e "s/^User=ical_homematic/User=${localuser}" "/etc/systemd/system/ical_homeatic${usuffix}.service"
-sed -i -e "s/^User=ical_homematic/Group=${localuser}" "/etc/systemd/system/ical_homeatic${usuffix}.service"
-sed -i -e "s/^ExecStart=\/usr\/local\/bin\/ical_homematic.py/ExecStart=\/usr\/local\/bin\/ical_homematic.py ${suffix}"
+servicefile=/etc/systemd/system/ical_homematic${usuffix}.service
+cp "${srcdir}/ical_homematic.service" "$servicefile"
+sed -i -e "s/^User=ical_homematic/User=${localuser}/"  "$servicefile"
+sed -i -e "s/^Group=ical_homematic/Group=${localuser}/" "$servicefile"
+sed -i -e "s/^WorkingDirectory=\/var\/local\/ical_homematic/WorkingDirectory=\/var\/local\/ical_homematic${usuffix}/" "$servicefile"
 
 systemctl daemon-reload
 systemctl enable --now ical_homematic${usuffix}.service

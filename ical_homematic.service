@@ -9,6 +9,7 @@ Type=simple
 User=ical_homematic
 Group=ical_homematic
 ExecStart=/usr/local/bin/ical_homematic.py
+WorkingDirectory=/var/local/ical_homematic
 
 [Install]
 WantedBy=multi-user.target
