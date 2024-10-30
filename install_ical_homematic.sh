@@ -12,6 +12,7 @@ nagios_plugin_dir="/usr/local/lib/nagios/plugins"
 localdir="/var/local/ical_homematic${usuffix}"
 localuser="ical_homematic${usuffix}"
 hmip_rest_api_confdir="${localdir}/.homematicip-rest-api"
+ical_homematic_conffile="${localdir}/ical_homematic.ini"
 
 # Customizing venv not supported, as the path is hardcoded in the first line of ical_homematic.py.
 venv="/usr/local/share/mypy"
