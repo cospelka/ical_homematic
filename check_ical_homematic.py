@@ -22,12 +22,17 @@ import os
 import time
 import sys
 
+if len(sys.argv) >=2 :
+  suffix = "_" + sys.argv[1]
+else:
+  suffix = ""
+
 def bye(status,statusstr):
   exstring = [ "OK", "WARNING", "CRITICAL", "UNKNOWN" ]
   print(f'{exstring[status]} {statusstr}')
   sys.exit(status)
 
-statfilename="/usr/local/var/ical_homematic/ical_homematic.msg"
+statfilename=f'/var/local/ical_homematic{suffix}/ical_homematic.msg'
 
 try:
   statfiletime=os.path.getmtime(statfilename)
