@@ -63,23 +63,7 @@ else
   chown "${localuser}:" "${hmip_rest_api_confdir}"
 fi
 
-if [ -f "${hmip_rest_api_confdir}/config.ini" ] ; then
-  echo "Konfigurationsdatei ${hmip_rest_api_confdir}/config.ini für homematic ip REST API existiert bereits."
-else
-  echo "Verbindung mit homematic ip Installation über homematic ip REST API herstellen und Konfigurationsdatei erzeugen."
-  "${venv}/bin/hmip_generate_auth_token"
-  echo "Ablegen der Konfigurationsdatei in ${hmip_rest_api_confdir}/config.ini"
-  mv config.ini "${hmip_rest_api_confdir}/"
-  chown "${localuser}:" "${hmip_rest_api_confdir}/config.ini"
-  chmod 600 "${hmip_rest_api_confdir}/config.ini"
-fi
-
-if ! [ -f "${hmip_rest_api_confdir}/config.ini" ] ; then
-  echo "${hmip_rest_api_confdir}/config.ini konnte nicht erzeugt werden. Tschüs."
-  exit 1
-fi
-
-echo "Installiere ical_homematic.py in /usr/local/bin"
+echo "Installiere ical_homematic.py"
 cp "${srcdir}/ical_homematic.py" "${localdir}"
 chown "${localuser}:" "${localdir}/ical_homematic.py"
 chmod 755 "${localdir}/ical_homematic.py"
@@ -99,6 +83,22 @@ else
   fi
   chown "${localuser}:" "${ical_homematic_conffile}"
   chmod 600 "${ical_homematic_conffile}"
+fi
+
+if [ -f "${hmip_rest_api_confdir}/config.ini" ] ; then
+  echo "Konfigurationsdatei ${hmip_rest_api_confdir}/config.ini für homematic ip REST API existiert bereits."
+else
+  echo "Verbindung mit homematic ip Installation über homematic ip REST API herstellen und Konfigurationsdatei erzeugen."
+  "${venv}/bin/hmip_generate_auth_token"
+  echo "Ablegen der Konfigurationsdatei in ${hmip_rest_api_confdir}/config.ini"
+  mv config.ini "${hmip_rest_api_confdir}/"
+  chown "${localuser}:" "${hmip_rest_api_confdir}/config.ini"
+  chmod 600 "${hmip_rest_api_confdir}/config.ini"
+fi
+
+if ! [ -f "${hmip_rest_api_confdir}/config.ini" ] ; then
+  echo "${hmip_rest_api_confdir}/config.ini konnte nicht erzeugt werden. Tschüs."
+  exit 1
 fi
 
 echo "Erstelle Systemdienst für ical_homematic."
