@@ -1,5 +1,12 @@
 #!/bin/bash
 
+# All files (except for the nagios/icinga plugin and the systemd unit file) will be stored under /var/local/<name>
+# <name> is set to ical_homematic by default. A corresponding unix user and group <name> will be created and the binaries 
+# will run as that user and group.
+# If you provide this install script with an argument (e.g. call it as install_ical_homeatic.py <suffix>), then <name> will 
+# be set to ical_homatic_<suffix>
+# This allows multiple instances to be run independently on the same machine.
+
 if [ -n "$1" ] ; then
 	suffix="$1"
 	usuffix="_$1"
