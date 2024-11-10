@@ -44,10 +44,6 @@ cycle_time = 60.
 # This is how far we look into the future in hours
 lookahead=4
 
-# keyword to look for in the SUMMARY field of an event; if the keyword 
-# is not present, we ignore the event. 
-heating_keyword="(HEIZ)"
-
 def start_error_log():
     global error_log
     global icinga_status
@@ -72,9 +68,10 @@ def error_msg(msg,status=0):
 def logtime():
     return datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
-def log(msg):
-    with open("ical_homematic.log","a") as f:
-        f.write(f'{logtime()} {msg}\n')
+def log(msg,log_level_par=0):
+    if log_level_par <= log_level:
+        with open("ical_homematic.log","a") as f:
+            f.write(f'{logtime()} {msg}\n')
 
 def handle_events(event_list):
     for event in event_list:
@@ -84,10 +81,10 @@ def handle_events(event_list):
         elif event["eventType"]==homematicip.base.enums.EventType.DEVICE_CHANGED:
             if isinstance(event["data"],homematicip.device.HeatingThermostat) or isinstance(event["data"],homematicip.device.HeatingThermostatCompact):
                 log(f'EVENT {event["data"].label} valve={event["data"].valvePosition*100.}%')
-            elif isinstance(event["data"],homematicip.device.TemperatureHumiditySensorDisplay) or isinstance(event["data"],homematicip.device.TemperatureHumiditySensorWithoutDisplay):
-                log(f'EVENT {event["data"].label} IS {event["data"].actualTemperature}°C')
             elif isinstance(event["data"],homematicip.device.WallMountedThermostatPro):
                 log(f'EVENT {event["data"].label} IS {event["data"].actualTemperature}°C SET {event["data"].setPointTemperature}°C')
+            elif isinstance(event["data"],homematicip.device.TemperatureHumiditySensorDisplay) or isinstance(event["data"],homematicip.device.TemperatureHumiditySensorWithoutDisplay):
+                log(f'EVENT {event["data"].label} IS {event["data"].actualTemperature}°C')
             elif isinstance(event["data"],homematicip.device.PlugableSwitchMeasuring):
                 log(f'EVENT {event["data"].label} state={event["data"].on}')
 
@@ -178,9 +175,9 @@ rooms["global"]["high"]=21.0
 rooms["global"]["low"]=18.0
 rooms["global"]["lown"]=16.0
 rooms["global"]["ramp"]=1.0
-rooms["global"]["influxdb"]="ical_homematic"
-rooms["global"]["influxhost"]="localhost"
-rooms["global"]["influxport"]=8086
+# rooms["global"]["influxdb"]="ical_homematic"
+# rooms["global"]["influxhost"]="localhost"
+# rooms["global"]["influxport"]=8086
 
 for config_file in config_files:
     try:
@@ -207,12 +204,13 @@ for room in rooms:
     rooms[room]["in_event"] =  False
     rooms[room]["boostLastSet"] = datetime.datetime(1970,1,1,tzinfo=datetime.timezone.utc)
     rooms[room]["night_mode"] = False
-    for key in [ "high", "low", "lown", "ramp", "night_start", "night_end" ]:
+    for key in [ "high", "low", "lown", "ramp", "night_start", "night_end", "summary_keyword" ]:
         if not key in rooms[room] and key in global_config:
             rooms[room][key]=global_config[key]
 
+log_level=global_config.get("log_level",0)
+
 # Read Homematic IP config
-print(homematicip.get_config_file_locations())
 config = homematicip.find_and_load_config_file()
 if config == None:
     log("Cannot find config.ini!")
@@ -227,17 +225,28 @@ home.onEvent += handle_events
 home.enable_events()
 
 # influxdb for logging
-try:
-    influx=InfluxDBClient(global_config["influxhost"],global_config["influxport"],database=global_config["influxdb"])
-except:
-    log(f'Could not setup InfluxDB client. Bye.')
-    sys.exit(1)
+if "influxhost" in global_config:
+    try:
+        influx=InfluxDBClient(global_config["influxhost"],global_config["influxport"],database=global_config["influxdb"])
+    except:
+        log(f'Could not setup InfluxDB client. Bye.')
+        sys.exit(1)
+else:
+    influx=None
 
 # Main loop
 icinga_status=0
 while True:
 
     start_error_log()
+
+    # Check if the global calendar needs to be refreshed
+    if "url" in global_config:
+        lu=global_config.get("cal_last_update",datetime.datetime(1970,1,1))
+        now=datetime.datetime.now()
+        if (now-lu).total_seconds() > 300.:
+            log(f'ICAL global: Refreshing ical.')
+            refresh_calendar(global_config)
 
     # Check if any of the calendars need to be refreshed
     for room in rooms:
@@ -250,7 +259,6 @@ while True:
 
     # UTC for interaction with online calendar
     start_date = datetime.datetime.now(datetime.timezone.utc)
-    end_date = start_date + datetime.timedelta(hours=lookahead)
 
     # Local time for lowering of base temperature over night
     start_date_local = datetime.datetime.now()
@@ -259,46 +267,70 @@ while True:
         # Get present state of this room
         state=get_room_data(room)
 
-        fields={}
-        for thermostat in state["thermostats"]:
-            fields[thermostat+".valvePosition"]=state["thermostats"][thermostat]
-        for fn in [ "actualTemperature", "setPointTemperature", "humidity", "vaporAmount" ]:
-            if fn in state:
-                fields[fn]=state[fn]
-        series=[
-                {
-                    "measurement": rooms[room]["influx_name"],
-                    "tags":        {},
-                    "time":        start_date,
-                    "fields":      fields
-                }
-               ]
-        try:
-            influx.write_points(series)
-        except:
-            log("Write to influxdb failed.")
-            error_msg("Write to influxdb failed.",1)
+        if influx:
+            fields={}
+            for thermostat in state["thermostats"]:
+                fields[thermostat+".valvePosition"]=state["thermostats"][thermostat]
+            for fn in [ "actualTemperature", "setPointTemperature", "humidity", "vaporAmount" ]:
+                if fn in state:
+                    fields[fn]=state[fn]
+            series=[
+                    {
+                        "measurement": rooms[room]["influx_name"],
+                        "tags":        {},
+                        "time":        start_date,
+                        "fields":      fields
+                    }
+                   ]
+            try:
+                influx.write_points(series)
+            except:
+                log("Write to influxdb failed.")
+                error_msg("Write to influxdb failed.",1)
 
         # Stop processing this room in case we only follow it for logging purposes
-        if not "url" in rooms[room]:
+        if not "thermostats" in state:
+            log(f'DEBUG {room}: No thermostats available for this room, continuing with next room after logging.',1)
             continue
 
-        # Get events within the next 'lookahead' hours 
-        try:
-            events = sorted(recurring_ical_events.of(rooms[room]["calendar"]).between(start_date, end_date), key=lambda event: event["DTSTART"].dt)
-        except:
-            log(f'Unable to get events within next {lookahead} hours for room {room}.')
-            error_msg(f'Unable to get events within next {lookahead} hours for room {room}.',1)
-            events=list()
+        if "url" in rooms[room]:
+            # Get events within the next 'lookahead' hours 
+            try:
+                events = recurring_ical_events.of(rooms[room]["calendar"], skip_bad_series=True).between(start_date, datetime.timedelta(hours=lookahead))
+            except:
+                log(f'Unable to get events within next {lookahead} hours for room {room}.')
+                error_msg(f'Unable to get events within next {lookahead} hours for room {room}.',1)
+                events=list()
+        elif "url" in global_config:
+            # Get events within the next 'lookahead' hours 
+            try:
+                events = recurring_ical_events.of(global_config["calendar"], skip_bad_series=True).between(start_date, datetime.timedelta(hours=lookahead))
+            except:
+                log(f'Unable to get events within next {lookahead} hours for global calendar.')
+                error_msg(f'Unable to get events within next {lookahead} hours for global calendar.',1)
+                events=list()
+        else:
+            log(f'DEBUG {room}: No calendar available for this room, continuing with next room.',1)
+            continue
 
+        heatevents=list()
+        if events:
+            for event in events:
+                myevent=False
+                if isinstance(event["DTSTART"].dt,datetime.datetime):
+                    if "summary_keyword" in rooms[room]:
+                        if rooms[room]["summary_keyword"] in str(event["SUMMARY"]):
+                            myevent=event
+                    if "ical_resource" in rooms[room] and "RESOURCES" in event:
+                        if rooms[room]["ical_resource"] in event["RESOURCES"].split(','):
+                            myevent=event
+                    if myevent:
+                        heatevents.append(myevent)
+                        log(f'DEBUG {room}: Event {myevent["SUMMARY"]} (from {myevent["DTSTART"].dt} to {myevent["DTEND"].dt}) ahead!',1)
+            heatevents=sorted(heatevents, key=lambda event: event["DTSTART"].dt)
+ 
         should_be_in_event=False
         should_be_ramping=False
-
-        # Are there any events within the next 'lookahead' hours that contain heating_keyword?
-        heatevents=list()
-        for event in events:
-            if heating_keyword in str(events[0]["SUMMARY"]):
-                heatevents.append(event)
 
         if heatevents:
             # Time to event
@@ -350,6 +382,7 @@ while True:
 
         # We assume that if heating_switches are not set for this room, boost mode does not make any sense, and neither the pre-heating mode or the overnight reduction
         if "heating_switches" in rooms[room]:
+            log(f'DEBUG {room}: This room has heating switches configured. No need to do any ramping, boosting or over-night reduction. Continuing with next room.',1)
             continue
 
         # In case we are in the ramp-up for the next event, set the set value to "high" when the ramp goes through the current temperature
@@ -368,27 +401,37 @@ while True:
 
         # Reduction of base temperature over night
         if "night_start" in rooms[room] and "night_end" in rooms[room]:
+            log(f'DEBUG {room}: night time reduction configured.',1)
             # Are we in the configured night time period?
             if rooms[room]["night_start"] > rooms[room]["night_end"]:
+                log(f'DEBUG {room}: night time reduction period includes midnight.',1)
                 # The period with reduced temperature includes midnight. This will be the more common case.
                 if start_date_local.hour >= rooms[room]["night_start"] or start_date_local.hour < rooms[room]["night_end"]:
                     should_be_in_night_mode = True
+                    log(f'DEBUG {room}: should be in night mode.',1)
                 else:
                     should_be_in_night_mode = False
+                    log(f'DEBUG {room}: should not be in night mode.',1)
             else:
+                log(f'DEBUG {room}: night time reduction period does not include midnight.',1)
                 # This is the other case...
                 if start_date_local.hour >= rooms[room]["night_start"] and start_date_local.hour < rooms[room]["night_end"]:
                     should_be_in_night_mode = True
+                    log(f'DEBUG {room}: should be in night mode.',1)
                 else:
                     should_be_in_night_mode = False
+                    log(f'DEBUG {room}: should not be in night mode.',1)
             # Flank detection for night mode
+            log(f'DEBUG {room}: night_mode: {rooms[room]["night_mode"]}',1)
             if should_be_in_night_mode and not rooms[room]["night_mode"]:
+                log(f'DEBUG {room} in_event: {rooms[room]["in_event"]} should_be_ramping: {should_be_ramping}',1)
                 if not (rooms[room]["in_event"] or should_be_ramping):
                     log(f'ACTION {room}: Setting to reduced base temperature of {rooms[room]["lown"]}°C over night.')
                     if set_room_temperature(room,rooms[room]["lown"]):
                         log(f'ACTION {room}: Entering night mode.')
                         rooms[room]["night_mode"] = True
             elif rooms[room]["night_mode"] and not should_be_in_night_mode:
+                log(f'DEBUG {room} setPointTemperature: {state["setPointTemperature"]}',1)
                 if state["setPointTemperature"] < rooms[room]["low"]:
                     log(f'ACTION {room}: Setting to base temperature of {rooms[room]["low"]}°C.')
                     if set_room_temperature(room,rooms[room]["low"]):
