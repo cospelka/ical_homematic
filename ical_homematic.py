@@ -437,6 +437,8 @@ while True:
                     if set_room_temperature(room,rooms[room]["low"]):
                         log(f'ACTION {room}: Leaving night mode.')
                         rooms[room]["night_mode"] = False
+        else:
+            log(f'DEBUG {room}: night time reduction NOT configured.',1)
 
     stop_error_log()
 
