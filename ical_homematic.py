@@ -25,6 +25,7 @@ import datetime
 import json
 import time
 import configparser
+import numbers
 import homematicip
 import homematicip.home
 import homematicip.device
@@ -387,17 +388,19 @@ while True:
 
         # In case we are in the ramp-up for the next event, set the set value to "high" when the ramp goes through the current temperature
         if should_be_ramping:
-            if state["actualTemperature"] < rooms[room]["high"] - timetohot * rooms[room]["ramp"]/3600. and state["setPointTemperature"] < rooms[room]["high"]: 
-                log(f'ACTION {room}: Setting temperature to {rooms[room]["high"]}°C at {timetohot} seconds from next event (Reason: {rooms[room]["event_title"]}).')
-                set_room_temperature(room,rooms[room]["high"])
+            if isinstance(state["actualTemperature"],numbers.Number):
+                if state["actualTemperature"] < rooms[room]["high"] - timetohot * rooms[room]["ramp"]/3600. and state["setPointTemperature"] < rooms[room]["high"]: 
+                    log(f'ACTION {room}: Setting temperature to {rooms[room]["high"]}°C at {timetohot} seconds from next event (Reason: {rooms[room]["event_title"]}).')
+                    set_room_temperature(room,rooms[room]["high"])
 
         # Do we need to boost?
         if "boost_threshold" in rooms[room]:
-            if state["setPointTemperature"] - state["actualTemperature"] > rooms[room]["boost_threshold"]:
-                if (start_date - rooms[room]["boostLastSet"]).total_seconds() > state["boostDuration"]*60.0:
-                    log(f'ACTION {room}: Setting {state["boostDuration"]} minutes boost mode because set point {state["setPointTemperature"]}°C is more than {threshold}K above the room temperature {state["actualTemperature"]}°C.')
-                    set_room_boost(room, True)
-                    rooms[room]["boostLastSet"]=start_date
+            if isinstance(state["actualTemperature"],numbers.Number):
+                if state["setPointTemperature"] - state["actualTemperature"] > rooms[room]["boost_threshold"]:
+                    if (start_date - rooms[room]["boostLastSet"]).total_seconds() > state["boostDuration"]*60.0:
+                        log(f'ACTION {room}: Setting {state["boostDuration"]} minutes boost mode because set point {state["setPointTemperature"]}°C is more than {threshold}K above the room temperature {state["actualTemperature"]}°C.')
+                        set_room_boost(room, True)
+                        rooms[room]["boostLastSet"]=start_date
 
         # Reduction of base temperature over night
         if "night_start" in rooms[room] and "night_end" in rooms[room]:
