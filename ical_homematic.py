@@ -104,12 +104,13 @@ def get_room_data(room):
                     error_msg(f'Device {label} in room {room} is not reachable.',2)
                 if isinstance(d,homematicip.device.PlugableSwitchMeasuring):
                     retval["switches"][label]={"state": d.on, "energy": d.energyCounter}
-                if isinstance(d,homematicip.device.WallMountedThermostatPro) or isinstance(d,homematicip.device.TemperatureHumiditySensorWithoutDisplay):
+                elif isinstance(d,homematicip.device.WallMountedThermostatPro) or isinstance(d,homematicip.device.TemperatureHumiditySensorWithoutDisplay):
                     retval["humidity"]=d.humidity
                     retval["vaporAmount"]=d.vaporAmount
-                elif isinstance(d,homematicip.device.HeatingThermostat) or isinstance(d,homematicip.device.HeatingThermostatCompact):
+                elif isinstance(d,homematicip.device.HeatingThermostat) or isinstance(d,homematicip.device.HeatingThermostatCompact) or isinstance(d,homematicip.device.HeatingThermostatEvo):
                     vp=d.valvePosition
                     vs=d.valveState
+                    actt=d.valveActualTemperature
                     if not isinstance (vp,float):
                         error_msg(f'HeatingThermostat {label} in room {room} has valvePosition {vp}.',2)
                     if d.automaticValveAdaptionNeeded:
@@ -117,10 +118,19 @@ def get_room_data(room):
                     if vs != "ADAPTION_DONE":
                         error_msg(f'HeatingThermostat {label} in room {room} has valveState {vs}',2)
                     retval["thermostats"][label]=vp
+                else:
+                    log(f'DEBUG {room}: Unknown device type {type(d).__name__}',1)
         if g.groupType=="HEATING" and g.label==room:
+            log(f'DEBUG {room}: This is a HEATING group',1)
             retval["boostDuration"]=g.boostDuration
             retval["setPointTemperature"]=g.setPointTemperature
             retval["actualTemperature"]=g.actualTemperature
+            if not retval["actualTemperature"] and "actt" in locals():
+                retval["actualTemperature"]=actt
+            log(f'DEBUG {room}: setPointTemperature: {retval["setPointTemperature"]} actualTemperature: {retval["actualTemperature"]}',1)
+    if "actt" in locals() and not retval["actualTemperature"]:
+        retval["actualTemperature"]=actt
+        log(f'DEBUG {room}: actualTemperature: {retval["actualTemperature"]}',1)
     return retval
 
 def set_room_temperature(room,temperature):
@@ -328,7 +338,7 @@ while True:
                     if myevent:
                         heatevents.append(myevent)
                         log(f'DEBUG {room}: Event {myevent["SUMMARY"]} (from {myevent["DTSTART"].dt} to {myevent["DTEND"].dt}) ahead!',1)
-            heatevents=sorted(heatevents, key=lambda event: event["DTSTART"].dt)
+            heatevents=sorted(heatevents, key=lambda argevent: argevent["DTSTART"].dt)
  
         should_be_in_event=False
         should_be_ramping=False
