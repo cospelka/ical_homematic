@@ -94,6 +94,8 @@ def get_room_data(room):
     retval=dict()
     retval["thermostats"]=dict()
     retval["switches"]=dict()
+    actt=0.0
+    num_ht=0
     for g in home.groups:
         if g.groupType=="META" and g.label==room:
             for d in g.devices:
@@ -110,7 +112,8 @@ def get_room_data(room):
                 elif isinstance(d,homematicip.device.HeatingThermostat) or isinstance(d,homematicip.device.HeatingThermostatCompact) or isinstance(d,homematicip.device.HeatingThermostatEvo):
                     vp=d.valvePosition
                     vs=d.valveState
-                    actt=d.valveActualTemperature
+                    actt+=d.valveActualTemperature
+                    num_ht+=1
                     if not isinstance (vp,float):
                         error_msg(f'HeatingThermostat {label} in room {room} has valvePosition {vp}.',2)
                     if d.automaticValveAdaptionNeeded:
@@ -125,12 +128,10 @@ def get_room_data(room):
             retval["boostDuration"]=g.boostDuration
             retval["setPointTemperature"]=g.setPointTemperature
             retval["actualTemperature"]=g.actualTemperature
-            if not retval["actualTemperature"] and "actt" in locals():
-                retval["actualTemperature"]=actt
-            log(f'DEBUG {room}: setPointTemperature: {retval["setPointTemperature"]} actualTemperature: {retval["actualTemperature"]}',1)
-    if "actt" in locals() and not retval["actualTemperature"]:
-        retval["actualTemperature"]=actt
-        log(f'DEBUG {room}: actualTemperature: {retval["actualTemperature"]}',1)
+    if num_ht >= 1 and not retval["actualTemperature"]:
+        log(f'DEBUG {room}: has {num_ht} heating thermostats, but likely no wall-mounted thermostat. We will get the temperature from the average.',1)
+        retval["actualTemperature"]=actt/num_ht
+    log(f'DEBUG {room}: actualTemperature: {retval["actualTemperature"]}',1)
     return retval
 
 def set_room_temperature(room,temperature):
