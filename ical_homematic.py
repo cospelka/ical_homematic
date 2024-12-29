@@ -251,19 +251,12 @@ if config == None:
     sys.exit(1)
 
 # Set up Homematic IP and events
-print("STEP_1", file=sys.stderr)
 home = homematicip.home.Home()
-print("STEP_2", file=sys.stderr)
 home.set_auth_token(config.auth_token)
-print("STEP_3", file=sys.stderr)
 home.init(config.access_point)
-print("STEP_4", file=sys.stderr)
 home.get_current_state()
-print("STEP_5", file=sys.stderr)
 home.onEvent += handle_events
-print("STEP_6", file=sys.stderr)
 home.enable_events()
-print("STEP_7", file=sys.stderr)
 
 # influxdb for logging
 if "influxhost" in global_config:
