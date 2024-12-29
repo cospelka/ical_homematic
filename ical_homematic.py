@@ -32,6 +32,7 @@ import homematicip.device
 import homematicip.group
 import homematicip.base.enums
 from influxdb import InfluxDBClient
+from pprint import pprint
 
 # This is where we put the error messages for icinga
 error_msg_filename="ical_homematic.msg"
@@ -88,6 +89,30 @@ def handle_events(event_list):
                 log(f'EVENT {event["data"].label} IS {event["data"].actualTemperature}°C')
             elif isinstance(event["data"],homematicip.device.PlugableSwitchMeasuring):
                 log(f'EVENT {event["data"].label} state={event["data"].on}')
+
+def get_energy_counters():
+    global home
+    counters=dict()
+    for d in home.devices:
+        if isinstance(d,homematicip.device.EnergySensorsInterface):
+            label=d.label
+            counters[label]=dict()
+            for subd in d.functionalChannels:
+                if isinstance(subd,homematicip.base.functionalChannels.EnergySensorInterfaceChannel):
+                    if subd.connectedEnergySensorType == 'ES_GAS':
+                        log(f'INFO: {label} gas volume {subd.gasVolume}',0)
+                        counters[label]["gas"]=subd.gasVolume
+                    elif subd.connectedEnergySensorType == 'ES_IEC':
+                        if subd.energyCounterOne:
+                            log(f'INFO: {label} energy counter 1 {subd.energyCounterOne}',0)
+                            counters[label]["elec1"]=subd.energyCounterOne
+                        if subd.energyCounterTwo:
+                            log(f'INFO: {label} energy counter 2 {subd.energyCounterTwo}',0)
+                            counters[label]["elec2"]=subd.energyCounterTwo
+                        if subd.energyCounterThree:
+                            log(f'INFO: {label} energy counter 3 {subd.energyCounterThree}',0)
+                            counters[label]["elec3"]=subd.energyCounterThree
+    return counters
 
 def get_room_data(room):
     global home
@@ -187,9 +212,6 @@ rooms["global"]["high"]=21.0
 rooms["global"]["low"]=18.0
 rooms["global"]["lown"]=16.0
 rooms["global"]["ramp"]=1.0
-# rooms["global"]["influxdb"]="ical_homematic"
-# rooms["global"]["influxhost"]="localhost"
-# rooms["global"]["influxport"]=8086
 
 for config_file in config_files:
     try:
@@ -229,12 +251,19 @@ if config == None:
     sys.exit(1)
 
 # Set up Homematic IP and events
+print("STEP_1", file=sys.stderr)
 home = homematicip.home.Home()
+print("STEP_2", file=sys.stderr)
 home.set_auth_token(config.auth_token)
+print("STEP_3", file=sys.stderr)
 home.init(config.access_point)
+print("STEP_4", file=sys.stderr)
 home.get_current_state()
+print("STEP_5", file=sys.stderr)
 home.onEvent += handle_events
+print("STEP_6", file=sys.stderr)
 home.enable_events()
+print("STEP_7", file=sys.stderr)
 
 # influxdb for logging
 if "influxhost" in global_config:
@@ -274,6 +303,27 @@ while True:
 
     # Local time for lowering of base temperature over night
     start_date_local = datetime.datetime.now()
+
+    energy_counters = get_energy_counters()
+
+    if influx and energy_counters:
+        fields={}
+        for counter in energy_counters:
+            for counter_type in energy_counters[counter]:
+                fields[f'counter_{counter}_{counter_type}']=energy_counters[counter][counter_type]
+        series=[
+                {
+                    "measurement": "energy_counters",
+                    "tags":        {},
+                    "time":        start_date,
+                    "fields":      fields
+                }
+               ]
+        try:
+            influx.write_points(series)
+        except:
+            log("Writing energy counters to influxdb failed.")
+            error_msg("Writing energy counters to influxdb failed.",1)
 
     for room in rooms:
         # Get present state of this room
