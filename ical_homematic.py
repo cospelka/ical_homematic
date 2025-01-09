@@ -212,6 +212,7 @@ rooms["global"]["high"]=21.0
 rooms["global"]["low"]=18.0
 rooms["global"]["lown"]=16.0
 rooms["global"]["ramp"]=1.0
+rooms["global"]["veto_resource"]=""
 
 for config_file in config_files:
     try:
@@ -238,7 +239,7 @@ for room in rooms:
     rooms[room]["in_event"] =  False
     rooms[room]["boostLastSet"] = datetime.datetime(1970,1,1,tzinfo=datetime.timezone.utc)
     rooms[room]["night_mode"] = False
-    for key in [ "high", "low", "lown", "ramp", "night_start", "night_end", "summary_keyword" ]:
+    for key in [ "high", "low", "lown", "ramp", "night_start", "night_end", "summary_keyword", "veto_resource" ]:
         if not key in rooms[room] and key in global_config:
             rooms[room][key]=global_config[key]
 
@@ -377,8 +378,12 @@ while True:
                         if rooms[room]["summary_keyword"] in str(event["SUMMARY"]):
                             myevent=event
                     if "ical_resource" in rooms[room] and "RESOURCES" in event:
-                        if rooms[room]["ical_resource"] in event["RESOURCES"].split(','):
-                            myevent=event
+                        resources=event["RESOURCES"].split(',')
+                        if rooms[room]["ical_resource"] in resources:
+                            if not ( rooms[room]["veto_resource"] != "" and rooms[room]["veto_resource"] in resources ):
+                                myevent=event
+                            else:
+                                log(f'DEBUG {room}: Event {event["SUMMARY"]} (from {event["DTSTART"].dt} to {event["DTEND"].dt}) skipped because of veto resource',1)
                     if myevent:
                         heatevents.append(myevent)
                         log(f'DEBUG {room}: Event {myevent["SUMMARY"]} (from {myevent["DTSTART"].dt} to {myevent["DTEND"].dt}) ahead!',1)
