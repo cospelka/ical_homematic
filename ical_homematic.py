@@ -82,7 +82,11 @@ def handle_events(event_list):
                 log(f'EVENT {event["data"].label} boost={event["data"].boostMode}')
         elif event["eventType"]==homematicip.base.enums.EventType.DEVICE_CHANGED:
             if isinstance(event["data"],homematicip.device.HeatingThermostat) or isinstance(event["data"],homematicip.device.HeatingThermostatCompact):
-                log(f'EVENT {event["data"].label} valve={event["data"].valvePosition*100.}%')
+                vp=event["data"].valvePosition
+                if type(vp) == int or type(vp) == float:
+                    vp *= 100.
+                    vp = f'{vp:.1f} %'
+                log(f'EVENT {event["data"].label} valve={vp}')
             elif isinstance(event["data"],homematicip.device.WallMountedThermostatPro):
                 log(f'EVENT {event["data"].label} IS {event["data"].actualTemperature}°C SET {event["data"].setPointTemperature}°C')
             elif isinstance(event["data"],homematicip.device.TemperatureHumiditySensorDisplay) or isinstance(event["data"],homematicip.device.TemperatureHumiditySensorWithoutDisplay):
@@ -114,21 +118,30 @@ def get_energy_counters():
                             counters[label]["elec3"]=subd.energyCounterThree
     return counters
 
-def get_room_data(room):
+def get_rooms():
     global home
+    global rooms
+    for g in home.groups:
+        if g.groupType=="HEATING":
+            if not g.label in rooms:
+                rooms[g.label]={}
+
+def get_room_data(roomname):
+    global home
+    global rooms
     retval=dict()
     retval["thermostats"]=dict()
     retval["switches"]=dict()
     actt=0.0
     num_ht=0
     for g in home.groups:
-        if g.groupType=="META" and g.label==room:
+        if g.groupType=="META" and g.label==roomname:
             for d in g.devices:
                 label=d.label
                 if d.lowBat:
-                    error_msg(f'Device {label} in room {room} has low battery.',1)
+                    error_msg(f'Device {label} in room {roomname} has low battery.',1)
                 if d.unreach:
-                    error_msg(f'Device {label} in room {room} is not reachable.',2)
+                    error_msg(f'Device {label} in room {roomname} is not reachable.',2)
                 if isinstance(d,homematicip.device.PlugableSwitchMeasuring):
                     retval["switches"][label]={"state": d.on, "energy": d.energyCounter}
                 elif isinstance(d,homematicip.device.WallMountedThermostatPro) or isinstance(d,homematicip.device.TemperatureHumiditySensorWithoutDisplay):
@@ -140,65 +153,85 @@ def get_room_data(room):
                     actt+=d.valveActualTemperature
                     num_ht+=1
                     if not isinstance (vp,float):
-                        error_msg(f'HeatingThermostat {label} in room {room} has valvePosition {vp}.',2)
+                        error_msg(f'HeatingThermostat {label} in room {roomname} has valvePosition {vp}.',2)
                     if d.automaticValveAdaptionNeeded:
-                        error_msg(f'HeatingThermostat {label} in room {room} requires automatic valve adaption.',2)
+                        error_msg(f'HeatingThermostat {label} in room {roomname} requires automatic valve adaption.',2)
                     if vs != "ADAPTION_DONE":
-                        error_msg(f'HeatingThermostat {label} in room {room} has valveState {vs}',2)
+                        error_msg(f'HeatingThermostat {label} in room {roomname} has valveState {vs}',2)
                     retval["thermostats"][label]=vp
                 else:
-                    log(f'DEBUG {room}: Unknown device type {type(d).__name__}',1)
-        if g.groupType=="HEATING" and g.label==room:
-            log(f'DEBUG {room}: This is a HEATING group',1)
-            retval["boostDuration"]=g.boostDuration
-            retval["setPointTemperature"]=g.setPointTemperature
-            retval["actualTemperature"]=g.actualTemperature
+                    log(f'DEBUG {roomname}: Unknown device type {type(d).__name__}',1)
+        if g.groupType=="HEATING":
+            # log(f'DEBUG {g.label}: has control mode {g.controlMode}',1)
+            if g.label==roomname:
+                log(f'DEBUG {roomname}: This is a HEATING group',1)
+                retval["boostDuration"]=g.boostDuration
+                retval["setPointTemperature"]=g.setPointTemperature
+                retval["actualTemperature"]=g.actualTemperature
+                retval["controlMode"]=g.controlMode
+                if "url" in rooms[g.label] or "ical_resource" in rooms[g.label]:
+                    if not g.controlMode == 'MANUAL':
+                        log(f'DEBUG {g.label}: Setting controlMode to MANUAL',1)
+                        try:
+                            g.set_control_mode('MANUAL')
+                        except:
+                            log(f'ERROR {g.label}: Setting controlMode to MANUAL failed.',1)
+
+            if ( not g.label in rooms ) or ( g.label in rooms and ( not ("url" in rooms[g.label] or "ical_resource" in rooms[g.label] ))):
+                if not g.controlMode == 'AUTOMATIC':
+                    log(f'DEBUG {g.label}: Setting controlMode to AUTOMATIC',1)
+                    try:
+                        g.set_control_mode('AUTOMATIC')
+                    except:
+                        log(f'ERROR {g.label}: Setting controlMode to AUTOMATIC failed.',1)
+
+
     if num_ht >= 1 and not retval["actualTemperature"]:
-        log(f'DEBUG {room}: has {num_ht} heating thermostats, but likely no wall-mounted thermostat. We will get the temperature from the average.',1)
+        log(f'DEBUG {roomname}: has {num_ht} heating thermostats, but likely no wall-mounted thermostat. We will get the temperature from the average.',1)
         retval["actualTemperature"]=actt/num_ht
-    log(f'DEBUG {room}: actualTemperature: {retval["actualTemperature"]}',1)
+    log(f'DEBUG {roomname}: actualTemperature: {retval["actualTemperature"]}',1)
     return retval
 
-def set_room_temperature(room,temperature):
+def set_room_temperature(roomname,temperature):
     global home
     for g in home.groups:
-        if g.groupType=="HEATING" and g.label==room:
+        if g.groupType=="HEATING" and g.label==roomname:
             g.set_point_temperature(temperature)
             return True
-    error_msg(f'Set point temperature could not be set to {temperature} for room {room} because we did not find the proper heating group.',2)
+    error_msg(f'Set point temperature could not be set to {temperature} for room {roomname} because we did not find the proper heating group.',2)
     return False
 
-def set_room_boost(room,status):
+def set_room_boost(roomname,status):
     global home
     for g in home.groups:
-        if g.groupType=="HEATING" and g.label==room:
+        if g.groupType=="HEATING" and g.label==roomname:
             g.set_boost(enable=status)
             return True
-    error_msg(f'Boost mode could not be set to {status} for room {room} because we did not find the proper heating group.',2)
+    error_msg(f'Boost mode could not be set to {status} for room {roomname} because we did not find the proper heating group.',2)
     return False
 
-def set_room_switch(room,switch,status):
+def set_room_switch(roomname,switch,status):
     global home
     for g in home.groups:
-        if g.groupType=="META" and g.label==room:
+        if g.groupType=="META" and g.label==roomname:
             for d in g.devices:
                 label=d.label
                 if isinstance(d,homematicip.device.PlugableSwitchMeasuring) and label==switch:
                     d.set_switch_state(status)
                     return True
-    error_msg(f'Switch state for switch {switch} in room {room} could not be set to {status} bcuause we did not find the proper device.',2)
+    error_msg(f'Switch state for switch {switch} in room {roomname} could not be set to {status} bcuause we did not find the proper device.',2)
     return False
 
-def refresh_calendar(room):
+def refresh_calendar(room,label):
     try:
         ical_string = urllib.request.urlopen(room["url"]).read()
     except:
-        error_msg(f'Could not download calendar file for {room}',2)
+        error_msg(f'Could not download calendar file for {label}',2)
     else:
         try:
             tmpcal = icalendar.Calendar.from_ical(ical_string)
         except:
-            error_msg(f'Could not convert calendar file to icalendar for {room}',2)
+            error_msg(f'Could not convert calendar file to icalendar for {label}',2)
         else:
             room["calendar"] = tmpcal
             room["cal_last_update"] = datetime.datetime.now()
@@ -207,42 +240,31 @@ def refresh_calendar(room):
 iniparser = configparser.RawConfigParser()
 iniparser.optionxform=str
 rooms = dict()
-rooms["global"]=dict()
-rooms["global"]["high"]=21.0
-rooms["global"]["low"]=18.0
-rooms["global"]["lown"]=16.0
-rooms["global"]["ramp"]=1.0
-rooms["global"]["veto_resource"]=""
 
+inisections={}
+inisections["global"]=dict()
+inisections["global"]["high"]=21.0
+inisections["global"]["low"]=18.0
+inisections["global"]["lown"]=16.0
+inisections["global"]["ramp"]=1.0
+inisections["global"]["veto_resource"]=""
 for config_file in config_files:
     try:
         iniparser.read(config_file)
     except:
         continue
-    for room in iniparser.sections():
-        if not room in rooms:
-            rooms[room]=dict()
-        for key in iniparser[room]:
+    for section_name in iniparser.sections():
+        if not section_name in inisections:
+            inisections[section_name]=dict()
+        for key in iniparser[section_name]:
             try:
-                rooms[room][key] = json.loads(iniparser[room][key])
+                inisections[section_name][key] = json.loads(iniparser[section_name][key])
             except Exception as e:
                 log(e)
-                log(f'JSON parse error in section {section}, key {key}. Bye.')
+                log(f'JSON parse error in section {section_name}, key {key}. Bye.')
                 sys.exit(1)
 
-# Initialize some status variables and pick up globals
-if "global" in rooms:
-    global_config=rooms.pop("global")
-else:
-    global_config=dict()
-for room in rooms:
-    rooms[room]["in_event"] =  False
-    rooms[room]["boostLastSet"] = datetime.datetime(1970,1,1,tzinfo=datetime.timezone.utc)
-    rooms[room]["night_mode"] = False
-    for key in [ "high", "low", "lown", "ramp", "night_start", "night_end", "summary_keyword", "veto_resource" ]:
-        if not key in rooms[room] and key in global_config:
-            rooms[room][key]=global_config[key]
-
+global_config=inisections.pop("global")
 log_level=global_config.get("log_level",0)
 
 # Read Homematic IP config
@@ -258,6 +280,35 @@ home.init(config.access_point)
 home.get_current_state()
 home.onEvent += handle_events
 home.enable_events()
+
+# Make sure we have all the rooms that have thermostats or thermometers, even those that are not in our config!
+get_rooms()
+
+# Apply config to rooms
+for section_name in inisections:
+    if "room_prefix" in inisections[section_name]:
+        for room in rooms:
+            if room.startswith(inisections[section_name]["room_prefix"]):
+                rooms[room]=inisections[section_name].copy()
+                rooms[room]["influx_name"]=section_name
+                rooms[room]["subroom"]=room.removeprefix(inisections[section_name]["room_prefix"])
+                rooms[room]["subroom"]=rooms[room]["subroom"].strip()
+    else:
+        if section_name in rooms:
+            rooms[section_name]=inisections[section_name]
+
+# Initialize some status variables and pick up globals
+for room in rooms:
+    rooms[room]["in_event"] =  False
+    rooms[room]["boostLastSet"] = datetime.datetime(1970,1,1,tzinfo=datetime.timezone.utc)
+    rooms[room]["night_mode"] = False
+    if not "influx_name" in rooms[room]:
+        rooms[room]["influx_name"]=room
+    if not "subroom" in rooms[room]:
+        rooms[room]["subroom"]=""
+    for key in [ "high", "low", "lown", "ramp", "night_start", "night_end", "summary_keyword", "veto_resource" ]:
+        if not key in rooms[room] and key in global_config:
+            rooms[room][key]=global_config[key]
 
 # influxdb for logging
 if "influxhost" in global_config:
@@ -281,7 +332,7 @@ while True:
         now=datetime.datetime.now()
         if (now-lu).total_seconds() > 300.:
             log(f'ICAL global: Refreshing ical.')
-            refresh_calendar(global_config)
+            refresh_calendar(global_config,"global calendar")
 
     # Check if any of the calendars need to be refreshed
     for room in rooms:
@@ -290,7 +341,7 @@ while True:
             now=datetime.datetime.now()
             if (now-lu).total_seconds() > 300.:
                 log(f'ICAL {room}: Refreshing ical.')
-                refresh_calendar(rooms[room])
+                refresh_calendar(rooms[room],room)
 
     # UTC for interaction with online calendar
     start_date = datetime.datetime.now(datetime.timezone.utc)
@@ -301,47 +352,63 @@ while True:
     energy_counters = get_energy_counters()
 
     if influx and energy_counters:
-        fields={}
+        series=[]
         for counter in energy_counters:
             for counter_type in energy_counters[counter]:
-                fields[f'counter_{counter}_{counter_type}']=energy_counters[counter][counter_type]
-        series=[
-                {
-                    "measurement": "energy_counters",
-                    "tags":        {},
-                    "time":        start_date,
-                    "fields":      fields
-                }
-               ]
-        try:
-            influx.write_points(series)
-        except:
-            log("Writing energy counters to influxdb failed.")
-            error_msg("Writing energy counters to influxdb failed.",1)
+                if counter_type == "gas":
+                    series.append({
+                                    "measurement": "energy",
+                                    "tags":        { "type": "gas", "name": counter },
+                                    "time":        start_date,
+                                    "fields":      { "gas": energy_counters[counter][counter_type] }
+                                  })
+                elif counter_type.startswith("elec"):
+                    series.append({
+                                    "measurement": "energy",
+                                    "tags":        { "type": "electrical", "name": counter, "number": counter_type.removeprefix("elec") },
+                                    "time":        start_date,
+                                    "fields":      { "electricity": energy_counters[counter][counter_type] }
+                                  })
+        if series:
+            try:
+                influx.write_points(series)
+            except:
+                log("Writing energy counters to influxdb failed.")
+                error_msg("Writing energy counters to influxdb failed.",1)
 
     for room in rooms:
         # Get present state of this room
         state=get_room_data(room)
 
         if influx:
+            series=[]
             fields={}
-            for thermostat in state["thermostats"]:
-                fields[thermostat+".valvePosition"]=state["thermostats"][thermostat]
             for fn in [ "actualTemperature", "setPointTemperature", "humidity", "vaporAmount" ]:
-                if fn in state:
-                    fields[fn]=state[fn]
-            series=[
-                    {
-                        "measurement": rooms[room]["influx_name"],
-                        "tags":        {},
-                        "time":        start_date,
-                        "fields":      fields
-                    }
-                   ]
+                if fn in state and isinstance(state[fn],numbers.Number): 
+                    fields[fn]=float(state[fn])
+            if not state["thermostats"]:
+                fields.pop("setPointTemperature")
+            series.append({
+                        "measurement": "homematic_rooms",
+                        "tags":        { "room": rooms[room]["influx_name"], "subroom": rooms[room]["subroom"] },
+                        "fields":     fields,
+                        "time":        start_date
+                        })
+
+            for thermostat in state["thermostats"]:
+                if isinstance(state["thermostats"][thermostat],numbers.Number): 
+                    series.append({
+                                "measurement": "homematic_rooms",
+                                "tags":        { "room": rooms[room]["influx_name"], "subroom": rooms[room]["subroom"], "thermostat": thermostat },
+                                "fields":      { "vp": state["thermostats"][thermostat] },
+                                "time":        start_date
+                                })
             try:
                 influx.write_points(series)
-            except:
-                log("Write to influxdb failed.")
+            except Exception as e:
+                log(f'Write to influxdb failed for room {room} with subroom {rooms[room]["subroom"]} on measurement {rooms[room]["influx_name"]}.')
+                log(f'Message was {e}.')
+                log(f'Data was {series}.')
                 error_msg("Write to influxdb failed.",1)
 
         # Stop processing this room in case we only follow it for logging purposes
@@ -349,25 +416,20 @@ while True:
             log(f'DEBUG {room}: No thermostats available for this room, continuing with next room after logging.',1)
             continue
 
-        if "url" in rooms[room]:
-            # Get events within the next 'lookahead' hours 
-            try:
-                events = recurring_ical_events.of(rooms[room]["calendar"], skip_bad_series=True).between(start_date, datetime.timedelta(hours=lookahead))
-            except:
-                log(f'Unable to get events within next {lookahead} hours for room {room}.')
-                error_msg(f'Unable to get events within next {lookahead} hours for room {room}.',1)
-                events=list()
-        elif "url" in global_config:
-            # Get events within the next 'lookahead' hours 
-            try:
-                events = recurring_ical_events.of(global_config["calendar"], skip_bad_series=True).between(start_date, datetime.timedelta(hours=lookahead))
-            except:
-                log(f'Unable to get events within next {lookahead} hours for global calendar.')
-                error_msg(f'Unable to get events within next {lookahead} hours for global calendar.',1)
-                events=list()
+        if "url" in rooms[room] and "calendar" in rooms[room]:
+            calendar_source=rooms[room]["calendar"]
+        elif "ical_resource" in rooms[room] and "url" in global_config and "calendar" in global_config:
+            calendar_source=global_config["calendar"]
         else:
             log(f'DEBUG {room}: No calendar available for this room, continuing with next room.',1)
             continue
+
+        try:
+            events = recurring_ical_events.of(calendar_source, skip_bad_series=True).between(start_date, datetime.timedelta(hours=lookahead))
+        except:
+            log(f'Unable to get events within next {lookahead} hours for room {room}.')
+            error_msg(f'Unable to get events within next {lookahead} hours for room {room}.',1)
+            events=list()
 
         heatevents=list()
         if events:
