@@ -150,8 +150,9 @@ def get_room_data(roomname):
                 elif isinstance(d,homematicip.device.HeatingThermostat) or isinstance(d,homematicip.device.HeatingThermostatCompact) or isinstance(d,homematicip.device.HeatingThermostatEvo):
                     vp=d.valvePosition
                     vs=d.valveState
-                    actt+=d.valveActualTemperature
-                    num_ht+=1
+                    if isinstance(d.valveActualTemperature,numbers.Number): 
+                        actt+=d.valveActualTemperature
+                        num_ht+=1
                     if not isinstance (vp,float):
                         error_msg(f'HeatingThermostat {label} in room {roomname} has valvePosition {vp}.',2)
                     if d.automaticValveAdaptionNeeded:
