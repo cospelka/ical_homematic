@@ -31,6 +31,7 @@ import homematicip.home
 import homematicip.device
 import homematicip.group
 import homematicip.base.enums
+from systemd.daemon import notify
 from influxdb import InfluxDBClient
 from pprint import pprint
 
@@ -45,6 +46,7 @@ cycle_time = 60.
 
 # This is how far we look into the future in hours
 lookahead=4
+
 
 def start_error_log():
     global error_log
@@ -77,6 +79,7 @@ def log(msg,log_level_par=0):
 
 def handle_events(event_list):
     for event in event_list:
+        notify("WATCHDOG=1")
         if event["eventType"]==homematicip.base.enums.EventType.GROUP_CHANGED:
             if isinstance(event["data"],homematicip.group.HeatingGroup):
                 log(f'EVENT {event["data"].label} boost={event["data"].boostMode}')
@@ -154,11 +157,11 @@ def get_room_data(roomname):
                         actt+=d.valveActualTemperature
                         num_ht+=1
                     if not isinstance (vp,float):
-                        error_msg(f'HeatingThermostat {label} in room {roomname} has valvePosition {vp}.',2)
+                        error_msg(f'HeatingThermostat {label} in room {roomname} has valvePosition {vp}.',1)
                     if d.automaticValveAdaptionNeeded:
                         error_msg(f'HeatingThermostat {label} in room {roomname} requires automatic valve adaption.',2)
                     if vs != "ADAPTION_DONE":
-                        error_msg(f'HeatingThermostat {label} in room {roomname} has valveState {vs}',2)
+                        error_msg(f'HeatingThermostat {label} in room {roomname} has valveState {vs}',1)
                     retval["thermostats"][label]=vp
                 else:
                     log(f'DEBUG {roomname}: Unknown device type {type(d).__name__}',1)
@@ -171,7 +174,7 @@ def get_room_data(roomname):
                 retval["actualTemperature"]=g.actualTemperature
                 retval["controlMode"]=g.controlMode
                 if "url" in rooms[g.label] or "ical_resource" in rooms[g.label]:
-                    if not g.controlMode == 'MANUAL':
+                    if not g.controlMode == 'MANUAL' and not g.controlMode == 'ECO':
                         log(f'DEBUG {g.label}: Setting controlMode to MANUAL',1)
                         try:
                             g.set_control_mode('MANUAL')
@@ -179,7 +182,7 @@ def get_room_data(roomname):
                             log(f'ERROR {g.label}: Setting controlMode to MANUAL failed.',1)
 
             if ( not g.label in rooms ) or ( g.label in rooms and ( not ("url" in rooms[g.label] or "ical_resource" in rooms[g.label] ))):
-                if not g.controlMode == 'AUTOMATIC':
+                if not g.controlMode == 'AUTOMATIC' and not g.controlMode == 'ECO':
                     log(f'DEBUG {g.label}: Setting controlMode to AUTOMATIC',1)
                     try:
                         g.set_control_mode('AUTOMATIC')
@@ -197,7 +200,8 @@ def set_room_temperature(roomname,temperature):
     global home
     for g in home.groups:
         if g.groupType=="HEATING" and g.label==roomname:
-            g.set_point_temperature(temperature)
+            if not g.controlMode == 'ECO':
+                g.set_point_temperature(temperature)
             return True
     error_msg(f'Set point temperature could not be set to {temperature} for room {roomname} because we did not find the proper heating group.',2)
     return False
@@ -388,13 +392,15 @@ while True:
                 if fn in state and isinstance(state[fn],numbers.Number): 
                     fields[fn]=float(state[fn])
             if not state["thermostats"]:
-                fields.pop("setPointTemperature")
-            series.append({
-                        "measurement": "homematic_rooms",
-                        "tags":        { "room": rooms[room]["influx_name"], "subroom": rooms[room]["subroom"] },
-                        "fields":     fields,
-                        "time":        start_date
-                        })
+                if "setPointTemperature" in fields:
+                    fields.pop("setPointTemperature")
+            if fields:
+                series.append({
+                            "measurement": "homematic_rooms",
+                            "tags":        { "room": rooms[room]["influx_name"], "subroom": rooms[room]["subroom"] },
+                            "fields":     fields,
+                            "time":        start_date
+                            })
 
             for thermostat in state["thermostats"]:
                 if isinstance(state["thermostats"][thermostat],numbers.Number): 
@@ -404,13 +410,14 @@ while True:
                                 "fields":      { "vp": state["thermostats"][thermostat] },
                                 "time":        start_date
                                 })
-            try:
-                influx.write_points(series)
-            except Exception as e:
-                log(f'Write to influxdb failed for room {room} with subroom {rooms[room]["subroom"]} on measurement {rooms[room]["influx_name"]}.')
-                log(f'Message was {e}.')
-                log(f'Data was {series}.')
-                error_msg("Write to influxdb failed.",1)
+            if series:
+                try:
+                    influx.write_points(series)
+                except Exception as e:
+                    log(f'Write to influxdb failed for room {room} with subroom {rooms[room]["subroom"]} on measurement {rooms[room]["influx_name"]}.')
+                    log(f'Message was {e}.')
+                    log(f'Data was {series}.')
+                    error_msg("Write to influxdb failed.",1)
 
         # Stop processing this room in case we only follow it for logging purposes
         if not "thermostats" in state:
@@ -442,6 +449,8 @@ while True:
                             myevent=event
                     if "ical_resource" in rooms[room] and "RESOURCES" in event:
                         resources=event["RESOURCES"].split(',')
+                        resources=[element.strip() for element in resources]
+                        log(f'DEBUG {room}: Event {event["SUMMARY"]} has resources {event["RESOURCES"]}')
                         if rooms[room]["ical_resource"] in resources:
                             if not ( rooms[room]["veto_resource"] != "" and rooms[room]["veto_resource"] in resources ):
                                 myevent=event
@@ -480,18 +489,21 @@ while True:
         # Flank detection for should_be_in_event
         if should_be_in_event and not rooms[room]["in_event"]:
             log(f'BEGIN {room}: {rooms[room]["event_title"]}')
-            if state["setPointTemperature"] + 0.1 < rooms[room]["high"]:
-                log(f'ACTION {room}: Setting temperature to {rooms[room]["high"]}°C (Reason: {rooms[room]["event_title"]}).')
-                if set_room_temperature(room,rooms[room]["high"]):
-                    rooms[room]["in_event"] = True
-            else:
-                log(f'ACTION {room}: No need to set temperature to {rooms[room]["high"]}°C; it is already at {state["setPointTemperature"]}°C (Reason: {rooms[room]["event_title"]}).')
-                rooms[room]["in_event"] = True
-            if "heating_switches" in rooms[room]:
-                for switch in rooms[room]["heating_switches"]:
-                    log(f'ACTION {room}: Setting switch {switch} to on. (Reason: {rooms[room]["event_title"]})')
-                    if set_room_switch(room,switch,True):
+            if isinstance(state["setPointTemperature"],numbers.Number):
+                if state["setPointTemperature"] + 0.1 < rooms[room]["high"]:
+                    log(f'ACTION {room}: Setting temperature to {rooms[room]["high"]}°C (Reason: {rooms[room]["event_title"]}).')
+                    if set_room_temperature(room,rooms[room]["high"]):
                         rooms[room]["in_event"] = True
+                else:
+                    log(f'ACTION {room}: No need to set temperature to {rooms[room]["high"]}°C; it is already at {state["setPointTemperature"]}°C (Reason: {rooms[room]["event_title"]}).')
+                    rooms[room]["in_event"] = True
+                if "heating_switches" in rooms[room]:
+                    for switch in rooms[room]["heating_switches"]:
+                        log(f'ACTION {room}: Setting switch {switch} to on. (Reason: {rooms[room]["event_title"]})')
+                        if set_room_switch(room,switch,True):
+                            rooms[room]["in_event"] = True
+            else:
+                log(f'WARNING {room}: setPointTemperature is not numeric!')
         if not should_be_in_event and rooms[room]["in_event"]:
             log(f'END {room}: {rooms[room]["event_title"]}')
             log(f'ACTION {room}: Setting temperature to {rooms[room]["low"]}°C. (Reason: {rooms[room]["event_title"]})')
