@@ -28,7 +28,7 @@ venv="/usr/local/share/mypy"
 srcdir="/usr/local/src/ical_homematic"
 
 echo "Installation erforderlicher debian Pakete."
-apt install python3-influxdb python3-pip python3-venv
+apt install python3-influxdb python3-pip python3-venv pkg-config
 
 if [ -d "${venv}" ] ; then
   echo "Virtuelle python Umgebung ${venv} existiert bereits."
@@ -38,7 +38,7 @@ else
 fi
 
 echo "Installation erforderlicher python Pakete mit pip in ${venv}."
-"${venv}/bin/pip" install homematicip
+"${venv}/bin/pip" install homematicip influxdb systemd-python icalendar recurring_ical_events
 
 if [ -d "${localdir}" ] ; then
   echo "Verzeichnis ${localdir} für Logs und Statusdateien sowie als Homeverzeichnis für ${localuser} existiert bereits."
