@@ -67,8 +67,8 @@ if [ -d "${hmip_rest_api_confdir}" ] ; then
 else
   echo "Erzeugen des Verzeichnisses ${hmip_rest_api_confdir}."
   mkdir -p "${hmip_rest_api_confdir}"
-  chown "${localuser}:" "${hmip_rest_api_confdir}"
 fi
+chown "${localuser}:" "${hmip_rest_api_confdir}"
 
 echo "Installiere ical_homematic.py"
 cp "${srcdir}/ical_homematic.py" "${localdir}"
@@ -88,9 +88,9 @@ else
   else
     cp "${srcdir}/ical_homematic.ini" "$ical_homematic_conffile"
   fi
-  chown "${localuser}:" "${ical_homematic_conffile}"
-  chmod 600 "${ical_homematic_conffile}"
 fi
+chown "${localuser}:" "${ical_homematic_conffile}"
+chmod 600 "${ical_homematic_conffile}"
 
 if [ -f "${hmip_rest_api_confdir}/config.ini" ] ; then
   echo "Konfigurationsdatei ${hmip_rest_api_confdir}/config.ini für homematic ip REST API existiert bereits."
