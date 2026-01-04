@@ -99,9 +99,9 @@ else
   "${venv}/bin/hmip_generate_auth_token"
   echo "Ablegen der Konfigurationsdatei in ${hmip_rest_api_confdir}/config.ini"
   mv config.ini "${hmip_rest_api_confdir}/"
-  chown "${localuser}:" "${hmip_rest_api_confdir}/config.ini"
-  chmod 600 "${hmip_rest_api_confdir}/config.ini"
 fi
+chown "${localuser}:" "${hmip_rest_api_confdir}/config.ini"
+chmod 600 "${hmip_rest_api_confdir}/config.ini"
 
 if ! [ -f "${hmip_rest_api_confdir}/config.ini" ] ; then
   echo "${hmip_rest_api_confdir}/config.ini konnte nicht erzeugt werden. Tschüs."
